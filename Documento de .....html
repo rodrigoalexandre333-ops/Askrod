@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Quiz Interativo Aprimorado</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root { --bg:#000; --card:#0b0b0b; --muted:#888; --cobalt:#0047ab; --dark-gray:#222 }
+    html,body{height:100%;margin:0}
+    body{font-family:'Segoe UI',Roboto,Arial,Helvetica,sans-serif;background:var(--bg);color:#fff;display:flex;justify-content:center;align-items:center;height:100vh}
+    .quiz-container{width:94%;max-width:720px;background:var(--card);padding:16px;border-radius:12px;box-shadow:0 6px 20px rgba(0,0,0,.6)}
+    #progressBar{width:100%;height:12px;background:#222;border-radius:8px;overflow:hidden;margin-top:12px}
+    #progressFill{height:100%;width:0%;background:linear-gradient(90deg,#4ade80,#16a34a);transition:width .4s ease}
+    .question{background:var(--cobalt);padding:12px;border-radius:10px;font-size:clamp(1.4rem,2.2vw,2rem);margin:8px 0 12px;text-align:justify}
+    .options button{display:block;width:100%;margin:8px 0;padding:clamp(10px,1.5vw,16px);font-size:clamp(1.4rem,3vw,1.8rem);border:0;border-radius:10px;cursor:pointer;background:var(--dark-gray);color:#fff;text-align:left}
+    .feedback-overlay{position:fixed;top:0;left:0;width:100%;height:100%;display:flex;justify-content:center;align-items:center;background:rgba(0,0,0,0.85);color:white;font-size:clamp(1.3rem,3.4vw,2.2rem);font-weight:bold;text-align:center;z-index:1000;padding:20px}
+    .green{color:#4ade80}.red{color:#f87171}.gray{color:#9ca3af}
+
+    #controls{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:12px}
+    button.control{background:#0a84ff;border:none;color:#fff;padding:8px 12px;border-radius:10px;cursor:pointer;font-size:1rem}
+
+    /* settings panel */
+    .settings-overlay{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.45);display:none;align-items:flex-end;padding:12px;z-index:1500}
+    .settings-panel{width:100%;max-width:420px;background:#0b0b0b;border-radius:12px;padding:12px;box-shadow:0 10px 40px rgba(0,0,0,.6);transform:translateY(120%);transition:transform .28s ease}
+    .settings-panel.show{transform:translateY(0)}
+    .settings-row{display:flex;justify-content:space-between;align-items:center;padding:8px 6px;border-bottom:1px solid #1b1b1b}
+    .settings-row:last-child{border-bottom:0}
+    .settings-title{font-size:1rem;color:#fff}
+    .toggle{display:inline-block;padding:6px 10px;background:#222;border-radius:999px;cursor:pointer;color:#fff}
+    .small{font-size:.85rem;color:#9ca3af}
+
+    #importBox{display:none;width:100%;margin-top:10px;padding:10px;border-radius:8px;background:#000;border:1px solid #222;color:#fff;min-height:120px}
+    #savedList{display:none;background:#111;padding:10px;border-radius:8px;margin-top:10px}
+    #savedList button{display:block;width:100%;margin:5px 0;padding:8px;border:none;border-radius:8px;background:#333;color:#fff;cursor:pointer;text-align:left}
+    #chartContainer{display:none;margin-top:20px;background:#111;padding:10px;border-radius:10px}
+
+    @media (orientation: landscape){#controls{display:none!important}}
+  </style>
+</head>
+<body>
+  <div class="quiz-container">
+    <div id="quiz"></div>
+    <div id="progressBar"><div id="progressFill"></div></div>
+
+    <div id="controls">
+      <button id="settingsBtn" class="control">⚙️</button>
+      <button id="playBtn" class="control">▶ Iniciar Teste</button>
+      <button id="resetBtn" class="control">⟲ Reiniciar</button>
+      <!-- actions that can be toggled in settings; default hidden in UI but available -->
+      <button id="importBtn" class="control" style="display:none">📥 Importar Questões</button>
+      <button id="saveBtn" class="control" style="display:none">💾 Salvar Projeto</button>
+      <button id="loadBtn" class="control" style="display:none">📂 Projetos Salvos</button>
+      <button id="deleteBtn" class="control" style="display:none">🗑️ Excluir Projetos</button>
+      <button id="compareBtn" class="control" style="display:none">📊 Comparar Histórico</button>
+      <button id="historyBtn" class="control" style="display:none">📘 Histórico de Testes</button>
+    </div>
+
+    <textarea id="importBox" placeholder='Cole aqui o JSON (array de questões)'></textarea>
+    <div id="savedList"></div>
+    <div id="resultsSummary"></div>
+    <div id="chartContainer"><canvas id="historyChart"></canvas></div>
+  </div>
+
+  <!-- settings overlay / auxiliary panel -->
+  <div id="settingsOverlay" class="settings-overlay" aria-hidden="true">
+    <div id="settingsPanel" class="settings-panel" role="dialog" aria-modal="true" aria-label="Configurações do Quiz">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <strong>Configurações</strong>
+        <button id="closeSettings" class="control" style="padding:6px 10px">Fechar</button>
+      </div>
+
+      <div class="settings-row">
+        <div>
+          <div class="settings-title">Mostrar Importar Questões</div>
+          <div class="small">Permite colar JSON de questões</div>
+        </div>
+        <div><button id="toggleImport" class="toggle">OFF</button></div>
+      </div>
+
+      <div class="settings-row">
+        <div>
+          <div class="settings-title">Mostrar Projetos Salvos</div>
+          <div class="small">Exibe lista de projetos no menu</div>
+        </div>
+        <div><button id="toggleSaved" class="toggle">OFF</button></div>
+      </div>
+
+      <div class="settings-row">
+        <div>
+          <div class="settings-title">Mostrar Salvar Projeto</div>
+          <div class="small">Permite exportar o projeto atual</div>
+        </div>
+        <div><button id="toggleSave" class="toggle">OFF</button></div>
+      </div>
+
+      <div class="settings-row">
+        <div>
+          <div class="settings-title">Mostrar Excluir Projetos</div>
+          <div class="small">Habilita botão para gerenciar exclusões</div>
+        </div>
+        <div><button id="toggleDelete" class="toggle">OFF</button></div>
+      </div>
+
+      <div class="settings-row">
+        <div>
+          <div class="settings-title">Mostrar Histórico / Comparar</div>
+          <div class="small">Exibe histórico de testes e ferramenta de comparação</div>
+        </div>
+        <div><button id="toggleHistory" class="toggle">OFF</button></div>
+      </div>
+
+    </div>
+  </div>
+
+  <div id="feedbackOverlay" class="feedback-overlay" style="display:none;"></div>
+
+  <script>
+    // data
+    const defaultQuestions = [{ text: "Os papéis de trabalho, que são a documentação da auditoria, devem ser elaborados exclusivamente em meio eletrônico.", options: ["A) Sim","B) Não"], correct:1, explanation: "Os papéis de trabalho podem ser elaborados tanto em meio físico quanto em meio eletrônico." }];
+    let questions = defaultQuestions.slice();
+    let currentIndex = 0;
+    let results = Array(questions.length).fill(null);
+
+    // elements
+    const settingsBtn = document.getElementById('settingsBtn');
+    const settingsOverlay = document.getElementById('settingsOverlay');
+    const settingsPanel = document.getElementById('settingsPanel');
+    const closeSettings = document.getElementById('closeSettings');
+
+    const importBtn = document.getElementById('importBtn');
+    const saveBtn = document.getElementById('saveBtn');
+    const loadBtn = document.getElementById('loadBtn');
+    const deleteBtn = document.getElementById('deleteBtn');
+    const compareBtn = document.getElementById('compareBtn');
+    const historyBtn = document.getElementById('historyBtn');
+    const importBox = document.getElementById('importBox');
+    const savedList = document.getElementById('savedList');
+    const chartContainer = document.getElementById('chartContainer');
+    const ctx = document.getElementById('historyChart');
+
+    // toggles in panel
+    const toggleImport = document.getElementById('toggleImport');
+    const toggleSaved = document.getElementById('toggleSaved');
+    const toggleSave = document.getElementById('toggleSave');
+    const toggleDelete = document.getElementById('toggleDelete');
+    const toggleHistory = document.getElementById('toggleHistory');
+
+    // open settings as auxiliary bottom panel
+    function openSettings(){
+      settingsOverlay.style.display = 'flex';
+      setTimeout(()=>settingsPanel.classList.add('show'),20);
+      settingsOverlay.setAttribute('aria-hidden','false');
+      // set toggles state from localStorage
+      toggleImport.textContent = localStorage.getItem('cfg_import') === '1' ? 'ON' : 'OFF';
+      toggleSaved.textContent = localStorage.getItem('cfg_saved') === '1' ? 'ON' : 'OFF';
+      toggleSave.textContent = localStorage.getItem('cfg_save') === '1' ? 'ON' : 'OFF';
+      toggleDelete.textContent = localStorage.getItem('cfg_delete') === '1' ? 'ON' : 'OFF';
+      toggleHistory.textContent = localStorage.getItem('cfg_history') === '1' ? 'ON' : 'OFF';
+    }
+
+    function closeSettingsPanel(){
+      settingsPanel.classList.remove('show');
+      settingsOverlay.setAttribute('aria-hidden','true');
+      setTimeout(()=>settingsOverlay.style.display='none',280);
+    }
+
+    settingsBtn.addEventListener('click', ()=>{ openSettings(); });
+    closeSettings.addEventListener('click', ()=>{ closeSettingsPanel(); });
+    settingsOverlay.addEventListener('click', (e)=>{ if(e.target===settingsOverlay) closeSettingsPanel(); });
+
+    // helpers to show/hide action buttons
+    function applyConfig(){
+      const showImport = localStorage.getItem('cfg_import') === '1';
+      const showSaved = localStorage.getItem('cfg_saved') === '1';
+      const showSave = localStorage.getItem('cfg_save') === '1';
+      const showDelete = localStorage.getItem('cfg_delete') === '1';
+      const showHistory = localStorage.getItem('cfg_history') === '1';
+
+      importBtn.style.display = showImport ? 'inline-block' : 'none';
+      loadBtn.style.display = showSaved ? 'inline-block' : 'none';
+      saveBtn.style.display = showSave ? 'inline-block' : 'none';
+      deleteBtn.style.display = showDelete ? 'inline-block' : 'none';
+      compareBtn.style.display = showHistory ? 'inline-block' : 'none';
+      historyBtn.style.display = showHistory ? 'inline-block' : 'none';
+    }
+
+    // toggle click handlers
+    [ [toggleImport,'cfg_import'], [toggleSaved,'cfg_saved'], [toggleSave,'cfg_save'], [toggleDelete,'cfg_delete'], [toggleHistory,'cfg_history'] ].forEach(([el,key])=>{
+      el.addEventListener('click', ()=>{
+        const now = localStorage.getItem(key) === '1' ? '0' : '1';
+        localStorage.setItem(key, now);
+        el.textContent = now === '1' ? 'ON' : 'OFF';
+        applyConfig();
+      });
+    });
+
+    // other existing functions (rendering, quiz behavior, history, save/load) reused from previous version
+    function wrapText(text){ const words=text.split(' '); let lines=[]; for(let i=0;i<words.length;i+=10){ lines.push(words.slice(i,i+10).join(' ')); } return lines.join('\n'); }
+    const quizContainer = document.getElementById('quiz');
+    const progressFill = document.getElementById('progressFill');
+    const resultsSummary = document.getElementById('resultsSummary');
+
+    function updateProgress(){ const total = questions.length||1; const percent = Math.round((currentIndex/total)*100); progressFill.style.width = percent+'%'; }
+    function renderQuestion(){ if(currentIndex>=questions.length){ showResults(); return;} updateProgress(); const q=questions[currentIndex]; quizContainer.innerHTML=''; const enunciado=document.createElement('div'); enunciado.className='question'; enunciado.textContent=wrapText(q.text); quizContainer.appendChild(enunciado); const opts=document.createElement('div'); opts.className='options'; q.options.forEach((opt,i)=>{ const btn=document.createElement('button'); btn.textContent=wrapText(opt); btn.onclick=()=>checkAnswer(i); opts.appendChild(btn); }); quizContainer.appendChild(opts); }
+
+    function showFeedback(isCorrect,explanation){ feedbackOverlay.style.display='flex'; feedbackOverlay.innerHTML = isCorrect ? `<span class='green'>✔ Correto!<br>${wrapText(explanation)}</span>` : `<span class='red'>✖ Errado!<br>${wrapText(explanation)}</span>`; setTimeout(()=>{ feedbackOverlay.style.display='none'; },7000); }
+
+    function checkAnswer(selected){ const q=questions[currentIndex]; const isCorrect = selected===q.correct; results[currentIndex]=isCorrect?'green':'red'; showFeedback(isCorrect,q.explanation); setTimeout(()=>{ currentIndex++; if(currentIndex>=questions.length){ showResults(); } else { renderQuestion(); } },7000); }
+
+    function showResults(){ progressFill.style.width='100%'; let correctCount = results.filter(r=>r==='green').length; resultsSummary.innerHTML = `<div>Acertos: <strong>${correctCount}</strong> / ${questions.length}</div>`; const historico = JSON.parse(localStorage.getItem('historicoResultados') || '[]'); historico.push(correctCount); localStorage.setItem('historicoResultados', JSON.stringify(historico)); quizContainer.innerHTML = `<h3>Resultado do Último Teste</h3>`; }
+
+    // save/load/import/delete/history actions
+    saveBtn.addEventListener('click', ()=>{ const nome = prompt('Nome do projeto:'); if(!nome) return; localStorage.setItem(nome, JSON.stringify(questions)); alert('Projeto salvo como '+nome); });
+    loadBtn.addEventListener('click', showSavedProjects);
+    function showSavedProjects(){ savedList.innerHTML=''; savedList.style.display = savedList.style.display==='none'?'block':'none'; if(savedList.style.display==='block'){ const keys = Object.keys(localStorage); if(keys.length===0){ savedList.innerHTML='<p class="gray">Nenhum projeto salvo.</p>'; return; } keys.forEach(k=>{ const btn=document.createElement('button'); btn.textContent='📄 '+k; btn.onclick=()=>{ const data = JSON.parse(localStorage.getItem(k)); questions = data; currentIndex=0; results=Array(questions.length).fill(null); renderQuestion(); }; savedList.appendChild(btn); }); } }
+
+    deleteBtn.addEventListener('click', ()=>{ // also open saved list to pick
+      showSavedProjects();
+      const nome = prompt('Digite o nome exato do projeto a excluir:');
+      if(nome && localStorage.getItem(nome)){ localStorage.removeItem(nome); alert('Projeto "'+nome+'" excluído.'); savedList.innerHTML=''; }
+    });
+
+    importBtn.addEventListener('click', ()=>{ importBox.style.display = importBox.style.display==='none'?'block':'none'; });
+    importBox.addEventListener('paste', ()=>{});
+    importBox.addEventListener('change', ()=>{});
+
+    compareBtn.addEventListener('click', ()=>{ const historico = JSON.parse(localStorage.getItem('historicoResultados')||'[]'); if(historico.length===0){ alert('Nenhum histórico disponível para comparar.'); return; } chartContainer.style.display='block'; new Chart(ctx,{ type:'bar', data:{ labels: historico.map((_,i)=>'Teste '+(i+1)), datasets:[{ label:'Acertos', data:historico, backgroundColor:'#4ade80', borderColor:'#16a34a', borderWidth:1 }] }, options:{ scales:{ y:{ beginAtZero:true } } } }); });
+
+    historyBtn.addEventListener('click', ()=>{ const historico = JSON.parse(localStorage.getItem('historicoResultados')||'[]'); if(historico.length===0){ alert('Nenhum histórico disponível.'); return; } chartContainer.style.display='block'; new Chart(ctx,{ type:'line', data:{ labels: historico.map((_,i)=>'Teste '+(i+1)), datasets:[{ label:'Desempenho ao longo do tempo', data:historico, borderColor:'#3b82f6', backgroundColor:'rgba(59,130,246,0.4)', fill:true, tension:0.3 }] }, options:{ responsive:true, plugins:{ legend:{ labels:{ color:'#fff' } } }, scales:{ x:{ ticks:{ color:'#fff' } }, y:{ ticks:{ color:'#fff' }, beginAtZero:true } } } }); });
+
+    // initialize config defaults if not present
+    if(localStorage.getItem('cfg_import')===null) localStorage.setItem('cfg_import','0');
+    if(localStorage.getItem('cfg_saved')===null) localStorage.setItem('cfg_saved','0');
+    if(localStorage.getItem('cfg_save')===null) localStorage.setItem('cfg_save','0');
+    if(localStorage.getItem('cfg_delete')===null) localStorage.setItem('cfg_delete','0');
+    if(localStorage.getItem('cfg_history')===null) localStorage.setItem('cfg_history','0');
+    applyConfig();
+
+    // helper: apply config on load
+    function applyConfig(){ const showImport = localStorage.getItem('cfg_import')==='1'; const showSaved = localStorage.getItem('cfg_saved')==='1'; const showSave = localStorage.getItem('cfg_save')==='1'; const showDelete = localStorage.getItem('cfg_delete')==='1'; const showHistory = localStorage.getItem('cfg_history')==='1'; importBtn.style.display = showImport? 'inline-block':'none'; loadBtn.style.display = showSaved? 'inline-block':'none'; saveBtn.style.display = showSave? 'inline-block':'none'; deleteBtn.style.display = showDelete? 'inline-block':'none'; compareBtn.style.display = showHistory? 'inline-block':'none'; historyBtn.style.display = showHistory? 'inline-block':'none'; }
+
+    // set toggles label visuals from storage
+    function refreshToggles(){ toggleImport.textContent = localStorage.getItem('cfg_import') === '1' ? 'ON' : 'OFF'; toggleSaved.textContent = localStorage.getItem('cfg_saved') === '1' ? 'ON' : 'OFF'; toggleSave.textContent = localStorage.getItem('cfg_save') === '1' ? 'ON' : 'OFF'; toggleDelete.textContent = localStorage.getItem('cfg_delete') === '1' ? 'ON' : 'OFF'; toggleHistory.textContent = localStorage.getItem('cfg_history') === '1' ? 'ON' : 'OFF'; }
+    refreshToggles();
+
+    // basic quiz controls
+    const playBtn2 = document.getElementById('playBtn');
+    const resetBtn2 = document.getElementById('resetBtn');
+    playBtn2.addEventListener('click', ()=>{ currentIndex=0; results=Array(questions.length).fill(null); renderQuestion(); if(window.matchMedia('(orientation: landscape)').matches){ document.getElementById('controls').style.display='none'; } });
+    resetBtn2.addEventListener('click', ()=>{ currentIndex=0; results=Array(questions.length).fill(null); renderQuestion(); });
+
+    // initial render
+    renderQuestion();
+  </script>
+</body>
+</html>
